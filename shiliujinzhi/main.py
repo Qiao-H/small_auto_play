@@ -151,6 +151,10 @@ class Mover:
         self.dx, self.dy = None, None
         # -1向上，1向下
         self.direction = 1
+        # 保存历史方块的列表
+        self.hist_pos = []
+        # 连续安全的块的数量计数器，用于判断点错是否需要往回点
+        self.continuous_safe_count = 0
 
         self.__get_dx(pos)
         self.__get_dy(pos)
@@ -212,7 +216,7 @@ class Mover:
             right_pos3 = right_probe_pos
             right_pos = right_pos3
 
-        self.dx = (right_pos[0] - left_pos[0] - 1)/2 - 1
+        self.dx = (right_pos[0] - left_pos[0])/2 - 1
 
     def __get_dy(self, pos):
         """
@@ -264,14 +268,35 @@ class Mover:
         pydirectinput.keyDown("e")
         pydirectinput.keyUp("e")
 
+    def add_to_hist_pos(self, pos, safe_block=1):
+        """
+            历史pos和移动方向保存
+        :param pos:
+        :return:
+        """
+        if not safe_block:
+            self.continuous_safe_count = 0
+        self.continuous_safe_count += 1
+        self.hist_pos.append((pos, self.direction))
+
     def move_back(self, pos):
         """
-            往回移动两列，用于点错时回退
+            往回移动十格，用于点错时回退
         :param pos: (0, 0)
         :return: (0, 0)
         """
-        back_pos = (pos[0] - 2*self.dx, pos[1])
-        pyautogui.moveTo(self.init_pos)
+        back_pos, direction = pos, self.direction
+        if self.continuous_safe_count <= 9:
+            for i in range(5):
+                if self.hist_pos:
+                    back_pos, direction = self.hist_pos.pop()
+                else:
+                    break
+            self.continuous_safe_count = 0
+
+        # 方向和点移动回去
+        self.direction = direction
+        pyautogui.moveTo(back_pos)
         return back_pos
 
     def move_to_next(self, pos):
@@ -320,13 +345,15 @@ def main():
 
     # 开始循环点击方块阶段
     while True:
-        # 如果当前块的安全指标已知，则点击，背景则忽略
+        # 如果当前块的安全指标已知，则点击并记录当前点位置，背景则忽略
         if recognizer.is_pos_safe_block(pos):
             mover.leftclick_block()
+            mover.add_to_hist_pos(pos)
             pos = mover.move_to_next(pos)
             continue
         elif recognizer.is_pos_dangerous_block(pos):
             mover.rightclick_block()
+            mover.add_to_hist_pos(pos, safe_block=0)
             pos = mover.move_to_next(pos)
             continue
         elif recognizer.is_pos_background_block(pos):
@@ -334,20 +361,21 @@ def main():
             continue
 
         # 如果当前块未探测过，则认为是安全的并尝试点击，再查看当前块的状态
-        # 1. 如果当前块状态为unprobed，则说明点错了，识别器记录当前块信息，然后从头开始再点
+        # 1. 如果当前块状态为unprobed，则说明点错了，识q别器记录当前块信息，然后从头开始再点
         # 2. 如果当前块不是unprobed，则说q明点对了，继续下一个
         mover.leftclick_block()
         # time.sleep(0.2)
         if recognizer.is_pos_error_block(pos) or recognizer.is_pos_unprobed_block(pos):
-            time.sleep(1)
+            time.sleep(1.35)
             recognizer.record_pos_state(pos=pos, state=recognizer.BlockState.DANGGEROUS.value)
             pos = mover.move_back(pos)
         else:
             recognizer.record_pos_state(pos=pos, state=recognizer.BlockState.SAFE.value)
+            mover.add_to_hist_pos(pos)
             pos = mover.move_to_next(pos)
 
         # 鼠标移至最右自动退出
-        if pos[0] > mover.frame[1][0]:
+        if pos[0] > mover.frame[1][0] - 80:
             exit(0)
 
 
